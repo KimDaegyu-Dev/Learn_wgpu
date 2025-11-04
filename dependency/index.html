@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Learn WGPU</title>
+    <style>
+      * {
+        padding: 0;
+        margin: 0;
+      }
+      canvas {
+        background-color: black;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+
+  <body id="wasm-example">
+    <canvas id="canvas"></canvas>
+    <script type="module">
+      import init, { run_web } from "./pkg/dependencies_and_window.js";
+
+  init()
+    .then(() => {
+      try {
+        run_web(); // winit 앱 실행
+      } catch (e) {
+        // winit/web이 던지는 제어흐름용 예외는 무시
+        if (e?.message?.includes("Using exceptions for control flow")) return;
+        throw e; // 다른 에러는 그대로 보고
+      }
+    })
+    .catch((e) => {
+      // init() 자체가 이 예외로 reject될 수도 있으니 한 번 더 방어
+      if (e?.message?.includes("Using exceptions for control flow")) return;
+      console.error(e);
+    });
+    </script>
+  </body>
+</html>
