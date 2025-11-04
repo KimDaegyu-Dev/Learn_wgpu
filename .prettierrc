@@ -1,0 +1,21 @@
+{
+  "tabWidth": 4,
+  "useTabs": false,
+  "printWidth": 100,
+  "singleQuote": true,
+  "plugins": ["prettier-plugin-rust", "prettier-plugin-toml"],
+  "overrides": [
+    {
+      "files": "*.rs",
+      "options": {
+        "parser": "rust"
+      }
+    },
+    {
+      "files": "*.toml",
+      "options": {
+        "parser": "toml"
+      }
+    }
+  ]
+}
