@@ -1,0 +1,615 @@
+English Spanish 日本語 한국어 Русский Türkçe Українська 简体中文 [목차](#toc) 
+
+# [webgpufundamentals.org](/webgpu/lessons/ko/)
+
+#forkongithub>div { background: #000; color: #fff; font-family: arial,sans-serif; text-align: center; font-weight: bold; padding: 5px 40px; font-size: 0.9rem; line-height: 1.3rem; position: relative; transition: 0.5s; display: block; width: 400px; position: absolute; top: 0; right: 0; transform: translateX(160px) rotate(45deg) translate(10px,70px); box-shadow: 4px 4px 10px rgba(0,0,0,0.8); pointer-events: auto; } #forkongithub a { text-decoration: none; color: #fff; } #forkongithub>div:hover { background: #c11; color: #fff; } #forkongithub .contributors { font-size: 0.75rem; background: rgba(255,255,255,0.2); line-height: 1.2; padding: 0.1em; } #forkongithub>div::before,#forkongithub>div::after { content: ""; width: 100%; display: block; position: absolute; top: 1px; left: 0; height: 1px; background: #fff; } #forkongithub>div::after { bottom: 1px; top: auto; } #forkongithub{ z-index: 9999; /\* needed for firefox \*/ overflow: hidden; width: 300px; height: 300px; position: absolute; right: 0; top: 0; pointer-events: none; } #forkongithub svg{ width: 1em; height: 1em; vertical-align: middle; } #forkongithub img { width: 1em; height: 1em; border-radius: 100%; vertical-align: middle; } @media (max-width: 900px) { #forkongithub>div { line-height: 1.2rem; } } @media (max-width: 700px) { #forkongithub { display: none; } } @media (max-width: 410px) { #forkongithub>div { font-size: 0.7rem; transform: translateX(150px) rotate(45deg) translate(20px,40px); } }
+
+[Fix, Fork, Contribute](https://github.com/webgpu/webgpufundamentals)
+
+# WebGPU 데이터 메모리 레이아웃
+
+WebGPU에서는 거의 모든 데이터가 셰이더에서 정의한 것과 일치하도록 메모리에 배치되어야 합니다. 이는 메모리 레이아웃 문제가 거의 발생하지 않는 JavaScript 및 TypeScript와 크게 대비됩니다.
+
+WGSL에서는 여러분이 셰이더를 작성할 때, `struct`(구조체)를 정의하는 것이 일반적입니다. 구조체는 JavaScript의 객체와 유사하며, JavaScript 객체의 프로퍼티를 선언하는 것과 유사하게 구조체의 멤버를 선언합니다. 그러나, 각 프로퍼티에 이름을 지정하는 것 외에도 타입을 지정해야 합니다. **또한**, 데이터를 제공할 때 **여러분이 직접** 버퍼에서 구조체의 특정 멤버가 나타나는 위치를 계산해야 합니다.
+
+[WGSL](webgpu-wgsl.html) v1에서는 4가지 기본 타입이 있습니다.
+
+*   `f32` (32비트 부동 소수점) - 32bit floating point number
+*   `i32` (32비트 정수) - 32bit integer
+*   `u32` (32비트 부호 없는 정수) - 32bit unsigned integer
+*   `f16` (16비트 부동 소수점) - 16bit floating point number [\[1\]](#fn1)
+
+1바이트(byte)는 8비트(bit)입니다. 따라서 32비트는 4바이트를, 16비트는 2바이트를 차지합니다.
+
+만약에 다음과 같은 구조체를 선언했다고 합시다.
+
+struct OurStruct {
+  velocity: f32,
+  acceleration: f32,
+  frameCount: u32,
+};
+
+이 구조체를 시각적으로 나타내보면 다음과 같습니다.
+
+각각의 네모 블럭은 1바이트입니다. 따라서 위 그림의 데이터는 총 12바이트를 차지합니다. `velocity`는 처음의 4바이트, `acceleration`은 그 다음 4바이트, `frameCount`가 마지막의 4바이트를 차지합니다.
+
+셰이더에 데이터를 넘기기 위해서, 우리는 `OurStruct`의 메모리 레이아웃과 일치하도록 데이터를 준비해야 합니다. 이를 위해서는 12바이트의 [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)를 만들고, 올바른 타입의 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray) 뷰를 설정하여 채워 넣어야 합니다.
+
+const kOurStructSizeBytes =
+  4 + // velocity
+  4 + // acceleration
+  4 ; // frameCount
+const ourStructData = new ArrayBuffer(kOurStructSizeBytes);
+const ourStructValuesAsF32 = new Float32Array(ourStructData);
+const ourStructValuesAsU32 = new Uint32Array(ourStructData);
+
+위에서, `ourStructData`는 [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)로 메모리의 한 덩어리입니다. 이 메모리의 내용을 확인하기 위해서는 뷰를 만들어야 합니다. `ourStructValuesAsF32`는 메모리를 32비트 부동 소수점 값으로 보는 뷰입니다. `ourStructDataAsU32`는 **동일한 메모리**를 32비트 부호 없는 정수 값으로 보는 뷰입니다.
+
+이제 저희는 하나의 버퍼와 2개의 뷰를 가지고 있습니다. 이제 구조체의 데이터를 설정할 수 있습니다.
+
+const kVelocityOffset = 0;
+const kAccelerationOffset = 1;
+const kFrameCountOffset = 2;
+
+ourStructValuesAsF32\[kVelocityOffset\] = 1.2;
+ourStructValuesAsF32\[kAccelerationOffset\] = 3.4;
+ourStructValuesAsU32\[kFrameCountOffset\] = 56;    // 정수값
+
+## `TypedArrays`
+
+프로그래밍에서 보통 그러하듯이 `OurStruct` 에 데이터를 채워 넣는 데는 여러 방법이 있습니다. [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)의 생성자는 다양한 형태를 가질 수 있습니다. 예를 들어 아래와 같습니다.
+
+*   `new Float32Array(12)`
+    
+    이는 **새로운** [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)를 만듭니다. 이 경우 12 \* 4바이트의 크기를 가집니다. 그리고 이를 보기 위한 [`Float32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array)를 만듭니다.
+    
+*   `new Float32Array([4, 5, 6])`
+    
+    이는 **새로운** [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)를 만듭니다. 이 경우 3 \* 4바이트의 크기를 가집니다. 그리고 이를 보기 위한 [`Float32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array)를 만듭니다. 그리고 초기값을 4, 5, 6으로 설정합니다.
+    
+    다른 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)도 전달할 수 있다는 점에 유의하세요. 예를 들어
+    
+    `new Float32Array(someUint8ArrayOf6Values)`는 **새로운** 6 \* 4 바이트의 크기를 갖는 [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)를 만들고, 이를 보기 위한 [`Float32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array)를 만듭니다. 그리고는 기존 뷰에서 새로운 [`Float32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array)로 값을 복사합니다. 이 값들은 이진값으로 복사되는 것이 아니라, 숫자로 복사됩니다. 즉, 다음과 같습니다.
+    
+    srcArray.forEach((v, i) => dstArray\[i\] = v);
+    
+    "숫자로 복사"된다는 것은 무슨 뜻일까요? 아래 예시를 봅시다.
+    
+    const f32s = new Float32Array(\[0.8, 0.9, 1.0, 1.1, 1.2\]);
+    const u32s = new Uint32Array(f32s); 
+    console.log(u32s);   // produces 0, 0, 1, 1, 1
+    
+    이렇게 되는 이유는 0.8이나 1.2같은 값을 [`Uint32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array)에 넣을 수 없기 때문입니다. 값들이 부호없는 정수로 변환되었습니다.
+    
+*   `new Float32Array(someArrayBuffer)`
+    
+    이건 저희가 이전에 사용해봤습니다. **기존에 있던 버퍼**를 보기 위한 새로운 [`Float32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array) 뷰를 만듭니다.
+    
+*   `new Float32Array(someArrayBuffer, byteOffset)`
+    
+    이는 **기존에 있던 버퍼**를 보기 위한 새로운 [`Float32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array) 뷰를 만듭니다. 그러나 `byteOffset`에서부터 시작합니다.
+    
+*   `new Float32Array(someArrayBuffer, byteOffset, length)`
+    
+    이는 **기존에 있던 버퍼**를 보기 위한 새로운 [`Float32Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array) 뷰를 만듭니다. 뷰는 `byteOffset`에서 시작하고, `length`만큼의 크기를 갖습니다. 예를 들어, `length`에 3을 전달하면 뷰는 3개의 f32 값(=12바이트)을 갖습니다.
+    
+
+이 마지막 형태를 사용하면 위쪽의 코드를 다음과 같이 변경할 수 있습니다.
+
+const kOurStructSizeBytes =
+  4 + // velocity
+  4 + // acceleration
+  4 ; // frameCount
+const ourStructData = new ArrayBuffer(kOurStructSizeBytes);
+const velocityView = new Float32Array(ourStructData, 0, 1);
+const accelerationView = new Float32Array(ourStructData, 4, 1);
+const frameCountView = new Uint32Array(ourStructData, 8, 1);
+
+velocityView\[0\] = 1.2;
+accelerationView\[0\] = 3.4;
+frameCountView\[0\] = 56;
+
+여기에, 모든 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)는 다음과 같은 프로퍼티를 가집니다.
+
+*   `length`: 요소의 개수
+*   `byteLength`: 바이트 기반의 크기
+*   `byteOffset`: [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)에 대한 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)의 오프셋
+*   `buffer`: 이 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)가 바라보고 있는 [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)
+
+그리고 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)는 여러 메서드를 갖고 있습니다. 많은 메서드들은 [`Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array)에 있는 것과 유사하지만, `subarray`는 그렇지 않습니다. 이는 동일한 타입의 새로운 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray) 뷰를 만듭니다. 파라미터는 `subarray(begin, end)`이며, `end`는 포함되지 않습니다. 따라서 `someTypedArray.subarray(5, 10)`은 `someTypedArray`의 5부터 9까지의 요소로 **동일한** [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)를 갖는 새로운 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)를 만듭니다.
+
+따라서 위의 코드를 다음과 같이 변경할 수 있습니다.
+
+const kOurStructSizeFloat32Units =
+  1 + // velocity
+  1 + // acceleration
+  1 ; // frameCount
+const ourStructDataAsF32 = new Float32Array(kOurStructSizeFloat32Units);
+const ourStructDataAsU32 = new Uint32Array(ourStructDataAsF32.buffer);
+const velocityView = ourStructDataAsF32.subarray(0, 1);
+const accelerationView = ourStructDataAsF32.subarray(1, 2);
+const frameCountView = ourStructDataAsU32.subarray(2, 3);
+
+velocityView\[0\] = 1.2;
+accelerationView\[0\] = 3.4;
+frameCountView\[0\] = 56;
+
+## 동일한 [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)에 대한 여러 뷰
+
+**동일한 arrayBuffer**에 대해 뷰를 갖는다는 것은 이런 의미입니다. 예를 들어,
+
+const v1 = new Float32Array(5);
+const v2 = v1.subarray(3, 5);  // v1 의 마지막 2개 값에 대한 뷰
+v2\[0\] = 123;
+v2\[1\] = 456;
+console.log(v1);  // 출력은 0, 0, 0, 123, 456
+
+비슷하게, 만일 다른 타입의 뷰를 만든다면 아래와 같습니다.
+
+const f32 = new Float32Array(\[1, 1000, -1000\])
+const u32 = new Uint32Array(f32.buffer);
+
+console.log(Array.from(u32).map(v => v.toString(16).padStart(8, '0')));
+// 출력은 '3f800000', '447a0000', 'c47a0000' 
+
+위 값은 1, 1000, -1000에 대한 부동소수점의 32비트 hex(_역주: 16진수_) 표현입니다.
+
+예를 들어: 16바이트의 [`ArrayBuffer`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer)를 만들어봅시다. 그러고 나서 동일한 메모리에 대해 다양한 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray) 뷰를 만들어 봅시다.
+
+const arrayBuffer = new ArrayBuffer(16);
+const asInt8      = new Int8Array(arrayBuffer);
+const asUint8     = new Uint8Array(arrayBuffer);
+const asInt16     = new Int16Array(arrayBuffer);
+const asUint16    = new Uint16Array(arrayBuffer);
+const asInt32     = new Int32Array(arrayBuffer);
+const asUint32    = new Uint32Array(arrayBuffer);
+const asFloat32   = new Float32Array(arrayBuffer);
+const asFloat64   = new Float64Array(arrayBuffer);
+const asBigInt64  = new BigInt64Array(arrayBuffer);
+const asBigUint64 = new BigInt64Array(arrayBuffer);
+
+// 초기 값들을 설정합니다.
+asFloat32.set(\[123, -456, 7.8, -0.123\]);
+
+다음은 이 모든 뷰들의 표현으로, 모두 동일한 메모리를 보고 있습니다. 아래에서, 어떤 숫자든 편집하면 동일한 메모리를 사용하는 해당 값들이 변경됩니다.
+
+## `map` 이슈
+
+주의해야 할 것은 [`TypedArray`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)의 `map` 함수는 동일한 타입의 새로운 typed array를 만든다는 것입니다!
+
+const f32a = new Float32Array(1, 2, 3);
+const f32b = f32a.map(v => v \* 2);                    // Ok
+const f32c = f32a.map(v => \`${v} doubled = ${v \*2}\`); // BAD!
+                    //  you can't put a string in a Float32Array
+
+typedarray를 다른 타입으로 맵핑해야 한다면 직접 배열을 순회하거나 [`Array.from`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array.from)를 사용할 수 있도록 자바스크립트 배열로 변환해야 합니다. 위 예제의 경우에는 아래와 같습니다.
+
+const f32d = Array.from(f32a).map(v => \`${v} doubled = ${v \*2}\`); // Ok
+
+## vec과 mat 타입
+
+[WGSL](webgpu-wgsl.html)는 4개의 기본 타입에서 비롯된 여러 타입들을 갖고 있습니다. 아래처럼요.
+
+.wgsl-types tr:nth-child(5n) { height: 1em };
+
+type
+
+description
+
+short name
+
+`vec2<f32>`
+
+2개의 `f32`를 갖는 타입
+
+`vec2f`
+
+`vec2<u32>`
+
+2개의 `u32`를 갖는 타입
+
+`vec2u`
+
+`vec2<i32>`
+
+2개의 `i32`를 갖는 타입
+
+`vec2i`
+
+`vec2<f16>`
+
+2개의 `f16`를 갖는 타입
+
+`vec2h`
+
+`vec3<f32>`
+
+3개의 `f32`를 갖는 타입
+
+`vec3f`
+
+`vec3<u32>`
+
+3개의 `u32`를 갖는 타입
+
+`vec3u`
+
+`vec3<i32>`
+
+3개의 `i32`를 갖는 타입
+
+`vec3i`
+
+`vec3<f16>`
+
+3개의 `f16`를 갖는 타입
+
+`vec3h`
+
+`vec4<f32>`
+
+4개의 `f32`를 갖는 타입
+
+`vec4f`
+
+`vec4<u32>`
+
+4개의 `u32`를 갖는 타입
+
+`vec4u`
+
+`vec4<i32>`
+
+4개의 `i32`를 갖는 타입
+
+`vec4i`
+
+`vec4<f16>`
+
+4개의 `f16`를 갖는 타입
+
+`vec4h`
+
+`mat2x2<f32>`
+
+2개의 `vec2<f32>`를 갖는 행렬
+
+`mat2x2f`
+
+`mat2x2<f16>`
+
+2개의 `vec2<f16>`를 갖는 행렬
+
+`mat2x2h`
+
+`mat2x3<f32>`
+
+2개의 `vec3<f32>`를 갖는 행렬
+
+`mat2x3f`
+
+`mat2x3<f16>`
+
+2개의 `vec3<f16>`를 갖는 행렬
+
+`mat2x3h`
+
+`mat2x4<f32>`
+
+2개의 `vec4<f32>`를 갖는 행렬
+
+`mat2x4f`
+
+`mat2x4<f16>`
+
+2개의 `vec4<f16>`를 갖는 행렬
+
+`mat2x4h`
+
+`mat3x2<f32>`
+
+3개의 `vec2<f32>`를 갖는 행렬
+
+`mat3x2f`
+
+`mat3x2<f16>`
+
+3개의 `vec2<f16>`를 갖는 행렬
+
+`mat3x2h`
+
+`mat3x3<f32>`
+
+3개의 `vec3<f32>`를 갖는 행렬
+
+`mat3x3f`
+
+`mat3x3<f16>`
+
+3개의 `vec3<f16>`를 갖는 행렬
+
+`mat3x3h`
+
+`mat3x4<f32>`
+
+3개의 `vec4<f32>`를 갖는 행렬
+
+`mat3x4f`
+
+`mat3x4<f16>`
+
+3개의 `vec4<f16>`를 갖는 행렬
+
+`mat3x4h`
+
+`mat4x2<f32>`
+
+4개의 `vec2<f32>`를 갖는 행렬
+
+`mat4x2f`
+
+`mat4x2<f16>`
+
+4개의 `vec2<f16>`를 갖는 행렬
+
+`mat4x2h`
+
+`mat4x3<f32>`
+
+4개의 `vec3<f32>`를 갖는 행렬
+
+`mat4x3f`
+
+`mat4x3<f16>`
+
+4개의 `vec3<f16>`를 갖는 행렬
+
+`mat4x3h`
+
+`mat4x4<f32>`
+
+4개의 `vec4<f32>`를 갖는 행렬
+
+`mat4x4f`
+
+`mat4x4<f16>`
+
+4개의 `vec4<f16>`를 갖는 행렬
+
+`mat4x4h`
+
+하나의 `vec3f`는 3개의 `f32`를 갖는 타입이고, `mat4x4f`는 `f32`의 4x4 행렬이므로, 16개의 `f32`를 갖습니다. 그렇다면 다음과 같은 구조체는 메모리에서 어떻게 보일까요?
+
+struct Ex2 {
+  scale: f32,
+  offset: vec3f,
+  projection: mat4x4f,
+};
+
+답을 아시겠나요?
+
+무슨 일이 있는 걸까요? 사실 모든 타입에는 요구되는 정렬(align)이 있습니다. 주어진 타입에는 특정 바이트의 배수로 정렬되어야 합니다.
+
+다음은 다양한 타입이 갖는 크기와 정렬입니다.
+
+잠깐만요. 이게 끝이 아닙니다!
+
+아래 구조체는 어떤 레이아웃을 가질 것 같나요?
+
+struct Ex3 {
+  transform: mat3x3f,
+  directions: array<vec3f, 4>,
+};
+
+`count` 개의 요소를 갖는 `type` 배열을 정의하는 `array<type, count>` 구문입니다.
+
+확인해봅시다…
+
+위에서 보여드린 정렬 테이블을 살펴보면, `vec3<f32>`는 16바이트의 정렬을 갖습니다. 이는 행렬이나 배열에 있더라도 각각의 `vec3<f32>`가 추가적인 공간을 갖는다는 것을 의미합니다.
+
+다른 것도 살펴봅시다.
+
+struct Ex4a {
+  velocity: vec3f,
+};
+
+struct Ex4 {
+  orientation: vec3f,
+  size: f32,
+  direction: array<vec3f, 1>,
+  scale: f32,
+  info: Ex4a,
+  friction: f32,
+};
+
+`size`는 `orientation` 바로 뒤에 있는 12바이트에 위치한 반면, 왜 `scale`과 `friction`은 32바이트와 64바이트로 오프셋이 밀렸을까요?
+
+이는 배열과 구조체가 자신만의 특별한 정렬 규칙을 갖기 때문입니다. 따라서 오직 하나의 `vec3f`만 가진 배열과 오직 하나의 `vec3f`만 가진 `Ex4a` 구조체는 별도의 룰에 따라 정렬됩니다.
+
+.wgsl-types tr:nth-child(5n) { height: 1em };
+
+type
+
+align
+
+size
+
+`struct` S with members M1...MN
+
+max(AlignOfMember(S,1), ... , AlignOfMember(S,N))
+
+roundUp(AlignOf(S), justPastLastMember)
+
+where justPastLastMember = OffsetOfMember(S,N) + SizeOfMember(S,N)
+
+`array<E, N>`
+
+AlignOf(E)
+
+N × roundUp(AlignOf(E), SizeOf(E))
+
+더 자세한 규칙은 [WGSL 스펙](https://www.w3.org/TR/WGSL/#alignment-and-size)에서 확인할 수 있습니다.
+
+# 오프셋과 크기를 계산하는 것은 아주 번거로운 일입니다!
+
+WGSL에서의 데이터 크기와 오프셋을 계산하는 것은 아마도 WebGPU의 가장 큰 고통일 것입니다. 여러분은 이러한 오프셋을 직접 계산하고, 최신 상태로 유지해야 합니다. 만약 여러분이 셰이더의 구조체 중간에 멤버를 추가한다면, 여러분은 자바스크립트로 돌아가서 모든 오프셋을 업데이트해야 합니다. 하나라도 바이트나 길이를 잘못 계산하면, 여러분이 셰이더에 전달하는 데이터는 잘못될 것입니다. 여러분은 코드를 작성하는 시점에서 에러를 받지 않을 것이지만, 여러분의 셰이더는 잘못된 데이터를 보고할 것입니다. 여러분의 모델은 그려지지 않을 것이고, 여러분의 계산은 잘못된 결과를 만들 것입니다.
+
+다행히, 이를 돕기 위한 라이브러리들이 존재합니다.
+
+[webgpu-utils](https://github.com/greggman/webgpu-utils)가 그 중 하나입니다.
+
+WGSL 코드를 제공하면 API가 이 모든 작업을 대신 수행합니다. 이렇게하면 구조체만 변경하더라도 대부분의 경우, 모든 것이 잘 작동합니다.
+
+예를 들어, 마지막 예제를 아래처럼 `webgpu-utils`에 전달할 수 있습니다.
+
+import {
+  makeShaderDataDefinitions,
+  makeStructuredView,
+} from 'https://greggman.github.io/webgpu-utils/dist/0.x/webgpu-utils-1.x.module.js';
+
+const code = \`
+struct Ex4a {
+  velocity: vec3f,
+};
+
+struct Ex4 {
+  orientation: vec3f,
+  size: f32,
+  direction: array<vec3f, 1>,
+  scale: f32,
+  info: Ex4a,
+  friction: f32,
+};
+@group(0) @binding(0) var<uniform> myUniforms: Ex4;
+
+...
+\`;
+
+const defs = makeShaderDataDefinitions(code);
+const myUniformValues = makeStructuredView(defs.uniforms.myUniforms);
+
+// set으로 일부 값들을 설정합니다.
+myUniformValues.set({
+  orientation: \[1, 0, -1\],
+  size: 2,
+  direction: \[0, 1, 0\],
+  scale: 1.5,
+  info: {
+    velocity: \[2, 3, 4\],
+  },
+  friction: 0.1,
+});
+
+// 이제 필요한 경우에 myUniformValues.buffer를 WebGPU에 전달하면 됩니다.
+
+이 라이브러리를 사용할지, 다른 것을 사용할지, 아예 사용하지 않을지는 여러분의 선택에 달려있습니다. 제 경우, 무엇인가 작동하지 않는 이유를 알기 위해 20분, 30분, 60분 동안 고민하다가 결국 수동으로 계산한 오프셋이나 크기가 잘못된 것이 문제였던 일이 많았습니다. 결국 차라리 라이브러리를 사용하여 이러한 수고를 피하고 싶었습니다.
+
+만약, 수동으로 계산하고자 한다면, [여기에 오프셋을 계산해주는 페이지](../resources/wgsl-offset-computer.html)가 있습니다.
+
+그 외에, WebGPU를 추상화하고 이런 것들과 다른 것들을 더 쉽게 만들어주는 많은 라이브러리들이 있습니다. 목록은 [여기](webgpu-resources.html)에서 찾을 수 있습니다.
+
+* * *
+
+1.  `f16` 지원은 [선택적인 기능](webgpu-limits-and-features.html)입니다. [↩︎](#fnref1)
+    
+
+English Spanish 日本語 한국어 Русский Türkçe Українська 简体中文
+
+*   기초
+
+*   [기초](/webgpu/lessons/ko/webgpu-fundamentals.html)
+*   [스테이지간 변수(Inter-stage Variables)](/webgpu/lessons/ko/webgpu-inter-stage-variables.html)
+*   [Uniforms](/webgpu/lessons/ko/webgpu-uniforms.html)
+*   [스토리지 버퍼(Storage Buffers)](/webgpu/lessons/ko/webgpu-storage-buffers.html)
+*   [정점 버퍼](/webgpu/lessons/ko/webgpu-vertex-buffers.html)
+*   텍스처
+
+*   [텍스처](/webgpu/lessons/ko/webgpu-textures.html)
+*   [이미지 로딩](/webgpu/lessons/ko/webgpu-importing-textures.html)
+*   [비디오 사용하기](/webgpu/lessons/ko/webgpu-textures-external-video.html)
+*   [큐브맵(Cube Maps)](/webgpu/lessons/ko/webgpu-cube-maps.html)
+*   [스토리지 텍스처](/webgpu/lessons/ko/webgpu-storage-textures.html)
+*   [멀티 샘플링 / MSAA](/webgpu/lessons/ko/webgpu-multisampling.html)
+
+*   [상수(Constants)](/webgpu/lessons/ko/webgpu-constants.html)
+*   [데이터 메모리 레이아웃](/webgpu/lessons/ko/webgpu-memory-layout.html)
+*   [Transparency and Blending](/webgpu/lessons/ko/webgpu-transparency.html)
+*   [Bind Group Layouts](/webgpu/lessons/ko/webgpu-bind-group-layouts.html)
+*   [데이터 복사하기](/webgpu/lessons/ko/webgpu-copying-data.html)
+*   [선택적 기능(optional feature)과 제한(limit)](/webgpu/lessons/ko/webgpu-limits-and-features.html)
+*   [Timing Performance](/webgpu/lessons/ko/webgpu-timing.html)
+*   [WGSL](/webgpu/lessons/ko/webgpu-wgsl.html)
+*   [동작 방식](/webgpu/lessons/ko/webgpu-how-it-works.html)
+*   [Compatibility Mode](/webgpu/lessons/ko/webgpu-compatibility-mode.html)
+
+*   3D 수학
+
+*   [Translation](/webgpu/lessons/ko/webgpu-translation.html)
+*   [Rotation](/webgpu/lessons/ko/webgpu-rotation.html)
+*   [Scale](/webgpu/lessons/ko/webgpu-scale.html)
+*   [Matrix Math](/webgpu/lessons/ko/webgpu-matrix-math.html)
+*   [Orthographic Projection](/webgpu/lessons/ko/webgpu-orthographic-projection.html)
+*   [Perspective Projection](/webgpu/lessons/ko/webgpu-perspective-projection.html)
+*   [Cameras](/webgpu/lessons/ko/webgpu-cameras.html)
+*   [Matrix Stacks](/webgpu/lessons/ko/webgpu-matrix-stacks.html)
+*   [Scene Graphs](/webgpu/lessons/ko/webgpu-scene-graphs.html)
+
+*   조명
+
+*   [Directional Lighting](/webgpu/lessons/ko/webgpu-lighting-directional.html)
+*   [Point Lighting](/webgpu/lessons/ko/webgpu-lighting-point.html)
+*   [Spot Lighting](/webgpu/lessons/ko/webgpu-lighting-spot.html)
+
+*   기법
+
+*   2D
+
+*   [Large Clip Space Triangle](/webgpu/lessons/ko/webgpu-large-triangle-to-cover-clip-space.html)
+
+*   3D
+
+*   [Environment maps](/webgpu/lessons/ko/webgpu-environment-maps.html)
+*   [Skyboxes](/webgpu/lessons/ko/webgpu-skybox.html)
+
+*   후처리
+
+*   [Basic CRT Effect](/webgpu/lessons/ko/webgpu-post-processing.html)
+
+*   컴퓨트 셰이더
+
+*   [컴퓨트 셰이더 기초](/webgpu/lessons/ko/webgpu-compute-shaders.html)
+*   [Image Histogram](/webgpu/lessons/ko/webgpu-compute-shaders-histogram.html)
+*   [Image Histogram Part 2](/webgpu/lessons/ko/webgpu-compute-shaders-histogram-part-2.html)
+
+*   기타
+
+*   [Resizing the Canvas](/webgpu/lessons/ko/webgpu-resizing-the-canvas.html)
+*   [Multiple Canvases](/webgpu/lessons/ko/webgpu-multiple-canvases.html)
+*   [Points](/webgpu/lessons/ko/webgpu-points.html)
+*   [WebGPU from WebGL](/webgpu/lessons/ko/webgpu-from-webgl.html)
+*   [Speed and Optimization](/webgpu/lessons/ko/webgpu-optimization.html)
+*   [Debugging and Errors](/webgpu/lessons/ko/webgpu-debugging.html)
+*   [리소스 / 참고자료](/webgpu/lessons/ko/webgpu-resources.html)
+*   [WGSL Function Reference](/webgpu/lessons/ko/webgpu-wgsl-function-reference.html)
+*   [WGSL Offset Computer](/webgpu/lessons/resources/wgsl-offset-computer.html)
+
+*   [github](https://github.com/webgpu/webgpufundamentals)
+*   [WGSL Offset Computer](/webgpu/lessons/resources/wgsl-offset-computer.html)
+*   [Tour of WGSL](https://google.github.io/tour-of-wgsl/)
+*   [WebGPU API Reference](https://gpuweb.github.io/types/)
+*   [WebGPU Spec](https://www.w3.org/TR/webgpu/)
+*   [WGSL Spec](https://www.w3.org/TR/WGSL/)
+*   [WebGPUReport.org](https://webgpureport.org)
+*   [Web3DSurvey.com](https://web3dsurvey.com/webgpu)
+
+질문이 있나요? [Stack Overflow](http://stackoverflow.com/questions/tagged/webgpu)에 물어보세요.
+
+[제안](https://github.com/webgpu/webgpufundamentals/issues/new?assignees=&labels=suggested+topic&template=suggest-topic.md&title=%5BSUGGESTION%5D) / [요청 사항](https://github.com/webgpu/webgpufundamentals/issues/new?assignees=&labels=&template=request.md&title=) / [이슈](https://github.com/webgpu/webgpufundamentals/issues/new?assignees=&labels=bug+%2F+issue&template=bug-issue-report.md&title=) / [버그](https://github.com/webgpu/webgpufundamentals/issues/new?assignees=&labels=bug+%2F+issue&template=bug-issue-report.md&title=)
+
+var disqus\_config = function () { this.page.url = \`${window.location.origin}${window.location.pathname}\`; this.page.identifier = \`WebGPU 데이터 메모리 레이아웃\`; }; (function() { // DON'T EDIT BELOW THIS LINE if (window.location.hostname.indexOf("webgpufundamentals.org") < 0) { return; } var d = document, s = d.createElement('script'); s.src = 'https://webgpufundamentals-org.disqus.com/embed.js'; s.setAttribute('data-timestamp', +new Date()); (d.head || d.body).appendChild(s); })();
+
+Please enable JavaScript to view the [comments powered by Disqus.](http://disqus.com/?ref_noscript)
+
+[comments powered by Disqus](http://disqus.com)
+
+const settings = { contribTemplate: "<a href=\\"${html\_url}\\"><img src=\\"${avatar\_url}\\"> ${login}</a>님<br> 당신의 <a href=\\"https://github.com/${owner}/${repo}/commits?author=${login}\\">${contributions} 기여에 감사드립니다.</a>", owner: "gfxfundamentals", repo: "webgpufundamentals", }; if (typeof module === 'object') {window.module = module; module = undefined;} window.dataLayer = window.dataLayer || \[\]; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-92BFT5PE4H');

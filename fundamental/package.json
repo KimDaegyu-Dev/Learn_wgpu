@@ -1,0 +1,21 @@
+{
+  "name": "fundamental",
+  "version": "1.0.0",
+  "main": "download_webgpu_lessons.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "convert-html-to-md": "node scripts/html-to-md.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.13.2",
+    "fs-extra": "^11.3.2",
+    "path": "^0.12.7",
+    "turndown": "^7.1.1",
+    "jsdom": "^22.1.0"
+  }
+}
