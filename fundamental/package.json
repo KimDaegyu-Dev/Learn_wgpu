@@ -14,8 +14,9 @@
   "dependencies": {
     "axios": "^1.13.2",
     "fs-extra": "^11.3.2",
+    "gl-matrix": "^3.4.4",
+    "jsdom": "^22.1.0",
     "path": "^0.12.7",
-    "turndown": "^7.1.1",
-    "jsdom": "^22.1.0"
+    "turndown": "^7.1.1"
   }
 }
